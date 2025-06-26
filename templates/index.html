@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>文件管理系统</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .upload-section {
+            margin-bottom: 20px;
+            padding: 20px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            background-color: white;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .file-list {
+            list-style: none;
+            padding: 0;
+            background-color: white;
+            border-radius: 5px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            border-bottom: 1px solid #eee;
+        }
+        .file-item:last-child {
+            border-bottom: none;
+        }
+        .file-item button {
+            padding: 8px 15px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        .file-item button:hover {
+            background-color: #0056b3;
+        }
+        input[type="file"] {
+            margin-right: 10px;
+            padding: 5px;
+        }
+        button[type="submit"] {
+            padding: 8px 15px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 3px;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        button[type="submit"]:hover {
+            background-color: #218838;
+        }
+        h1, h2 {
+            color: #333;
+        }
+    </style>
+</head>
+<body>
+    <h1>文件管理系统</h1>
+    
+    <div class="upload-section">
+        <h2>上传文件</h2>
+        <form id="uploadForm">
+            <input type="file" id="fileInput" required>
+            <button type="submit">上传</button>
+        </form>
+    </div>
+
+    <div class="file-list-section">
+        <h2>文件列表</h2>
+        <ul id="fileList" class="file-list"></ul>
+    </div>
+
+    <script>
+        // 获取文件列表
+        async function loadFiles() {
+            const response = await fetch('/files');
+            const files = await response.json();
+            const fileList = document.getElementById('fileList');
+            fileList.innerHTML = '';
+            
+            files.forEach(file => {
+                const li = document.createElement('li');
+                li.className = 'file-item';
+                const fileName = file.name.split('/').pop();
+                li.innerHTML = `
+                    <span>${fileName}</span>
+                    <button onclick="printFile('${fileName}')">打印</button>
+                `;
+                fileList.appendChild(li);
+            });
+        }
+
+        // 上传文件
+        document.getElementById('uploadForm').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const fileInput = document.getElementById('fileInput');
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    alert('文件上传成功');
+                    fileInput.value = '';
+                    loadFiles();
+                } else {
+                    alert('上传失败: ' + result.error);
+                }
+            } catch (error) {
+                alert('上传失败: ' + error);
+            }
+        });
+
+        // 打印文件
+        async function printFile(fileName) {
+            try {
+                const response = await fetch('/print', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ fileName: fileName })
+                });
+                const result = await response.json();
+                if (response.ok) {
+                    alert('打印任务已发送');
+                } else {
+                    alert('打印失败: ' + result.error);
+                }
+            } catch (error) {
+                alert('打印失败: ' + error);
+            }
+        }
+
+        // 页面加载时获取文件列表
+        loadFiles();
+    </script>
+</body>
+</html> 
