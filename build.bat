@@ -3,11 +3,11 @@ echo 编译文件打印服务...
 
 REM 设置编译环境变量
 set GOOS=windows
-set GOARCH=amd64
+set GOARCH=386
 set CGO_ENABLED=0
 
 REM 设置兼容Windows 7的编译参数
-set GOFLAGS=-ldflags="-s -w -H windowsgui"
+set GOFLAGS=-ldflags="-s -w"
 
 echo 编译参数:
 echo GOOS=%GOOS%

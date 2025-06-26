@@ -2,13 +2,12 @@ package main
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
-
-	"github.com/gin-gonic/gin"
-	"github.com/google/uuid"
 )
 
 type FileInfo struct {
@@ -16,34 +15,62 @@ type FileInfo struct {
 	Path string `json:"path"`
 }
 
-func handleFileUpload(c *gin.Context) {
-	file, err := c.FormFile("file")
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "无法获取上传文件"})
+// handleFileUpload 使用标准库 net/http 处理文件上传
+func handleFileUpload(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
 		return
 	}
+
+	// 解析 multipart form, 10 MB 的内存限制
+	if err := r.ParseMultipartForm(10 << 20); err != nil {
+		writeJSONError(w, "Could not parse multipart form", http.StatusBadRequest)
+		return
+	}
+
+	file, handler, err := r.FormFile("file")
+	if err != nil {
+		writeJSONError(w, "Could not retrieve file from form-data", http.StatusBadRequest)
+		return
+	}
+	defer file.Close()
 
 	// 生成唯一文件名
-	ext := filepath.Ext(file.Filename)
-	newFileName := fmt.Sprintf("%s%s", uuid.New().String(), ext)
+	ext := filepath.Ext(handler.Filename)
+	newFileName := fmt.Sprintf("%s%s", generateUUID(), ext)
 	filePath := filepath.Join(uploadDir, newFileName)
 
-	// 保存文件
-	if err := c.SaveUploadedFile(file, filePath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "文件保存失败"})
+	// 创建目标文件
+	dst, err := os.Create(filePath)
+	if err != nil {
+		writeJSONError(w, "Could not create file on server", http.StatusInternalServerError)
+		return
+	}
+	defer dst.Close()
+
+	// 将上传的文件内容复制到目标文件
+	if _, err := io.Copy(dst, file); err != nil {
+		writeJSONError(w, "Could not save uploaded file", http.StatusInternalServerError)
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{
-		"message": "文件上传成功",
+	log.Printf("Successfully uploaded file: %s as %s", handler.Filename, newFileName)
+	writeJSONResponse(w, map[string]interface{}{
+		"message": "File uploaded successfully",
 		"file": FileInfo{
-			Name: file.Filename,
+			Name: handler.Filename,
 			Path: newFileName,
 		},
-	})
+	}, http.StatusOK)
 }
 
-func listFiles(c *gin.Context) {
+// listFiles 使用标准库 net/http 列出已上传的文件
+func listFiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSONError(w, "Only GET method is allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
 	var files []FileInfo
 
 	err := filepath.Walk(uploadDir, func(path string, info os.FileInfo, err error) error {
@@ -60,9 +87,10 @@ func listFiles(c *gin.Context) {
 	})
 
 	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "获取文件列表失败"})
+		log.Printf("Failed to list files: %v", err)
+		writeJSONError(w, "Could not list files", http.StatusInternalServerError)
 		return
 	}
 
-	c.JSON(http.StatusOK, files)
+	writeJSONResponse(w, files, http.StatusOK)
 }
