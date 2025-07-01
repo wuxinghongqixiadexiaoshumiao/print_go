@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
-	"pat
 	"path/filepath"
 	"strings"
 
@@ -91,10 +90,12 @@ func handlePrint(w http.ResponseWriter, r *http.Request) {
 		}
 		printerToUse = defaultPrinter
 	}
-断文件类型
+
+	// 判断文件类型
 	ext := strings.ToLower(filepath.Ext(filePath))
-	if ext == ".pdf" {
-		// 使用SumatraPDF.exe静默打印PDF
+	imageExts := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".bmp": true, ".gif": true, ".tif": true, ".tiff": true}
+	if ext == ".pdf" || imageExts[ext] {
+		// 使用SumatraPDF.exe静默打印PDF和图片
 		sumatraPath, err := filepath.Abs("SumatraPDF.exe")
 		if err != nil {
 			log.Printf("获取SumatraPDF.exe绝对路径失败: %v", err)
@@ -110,7 +111,12 @@ func handlePrint(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			log.Printf("SumatraPDF打印失败: %v Output: %s", err, string(output))
 			writeJSONError(w, fmt.Sprintf("SumatraPDF打印失败: %v Output: %s", err, string(output)), http.StatusInternalServerError)
-			
+			return
+		}
+		log.Printf("SumatraPDF打印命令已发送: %s", string(output))
+		writeJSONResponse(w, map[string]string{"message": "打印任务已发送。"}, http.StatusOK)
+		return
+	}
 
 	p, err := printer.Open(printerToUse)
 	if err != nil {
