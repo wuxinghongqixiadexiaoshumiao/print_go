@@ -91,11 +91,11 @@ func handlePrint(w http.ResponseWriter, r *http.Request) {
 		printerToUse = defaultPrinter
 	}
 
-	// 判断文件类型
 	ext := strings.ToLower(filepath.Ext(filePath))
 	imageExts := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".bmp": true, ".gif": true, ".tif": true, ".tiff": true}
+
 	if ext == ".pdf" || imageExts[ext] {
-		// 使用SumatraPDF.exe静默打印PDF和图片
+		// 使用SumatraPDF.exe静默打印PDF和图片，因为这是最可靠的方式
 		sumatraPath, err := filepath.Abs("SumatraPDF.exe")
 		if err != nil {
 			log.Printf("获取SumatraPDF.exe绝对路径失败: %v", err)
@@ -116,57 +116,29 @@ func handlePrint(w http.ResponseWriter, r *http.Request) {
 		log.Printf("SumatraPDF打印命令已发送: %s", string(output))
 		writeJSONResponse(w, map[string]string{"message": "打印任务已发送。"}, http.StatusOK)
 		return
-	}
+	} else {
+		// 对于其他文件类型（如Word文档），使用PowerShell
+		var psCommand string
+		if printerToUse != "" {
+			psCommand = fmt.Sprintf(`Start-Process -FilePath "%s" -Verb PrintTo -ArgumentList '"%s"' -WindowStyle Hidden -PassThru | Wait-Process`, filePath, printerToUse)
+		} else {
+			psCommand = fmt.Sprintf(`Start-Process -FilePath "%s" -Verb Print -WindowStyle Hidden`, filePath)
+		}
 
-	p, err := printer.Open(printerToUse)
-	if err != nil {
-		log.Printf("Failed to open printer '%s': %v", printerToUse, err)
-		writeJSONError(w, fmt.Sprintf("Failed to open printer: %v", err), http.StatusInternalServerError)
-		return
-	}
-	defer p.Close()
+		cmd := exec.Command("powershell", "-Command", psCommand)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Printf("PowerShell print command failed: %v Output: %s", err, string(output))
+			writeJSONError(w, fmt.Sprintf("Failed to print file using PowerShell: %v Output: %s", err, string(output)), http.StatusInternalServerError)
+			return
+		}
 
-	err = p.StartDocument(filepath.Base(filePath), "RAW")
-	if err != nil {
-		log.Printf("Failed to start document: %v", err)
-		writeJSONError(w, fmt.Sprintf("Failed to start document: %v", err), http.StatusInternalServerError)
-		return
+		log.Printf("Print command sent via PowerShell for file '%s' to printer '%s'. Output: %s", filePath, printerToUse, string(output))
+		writeJSONResponse(w, map[string]string{
+			"message": "Print job sent successfully via PowerShell.",
+			"details": fmt.Sprintf("File: %s, Printer: %s", filePath, printerToUse),
+		}, http.StatusOK)
 	}
-	defer p.EndDocument()
-
-	err = p.StartPage()
-	if err != nil {
-		log.Printf("Failed to start page: %v", err)
-		writeJSONError(w, fmt.Sprintf("Failed to start page: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	fileBytes, err := os.ReadFile(filePath)
-	if err != nil {
-		log.Printf("Failed to read file '%s': %v", filePath, err)
-		writeJSONError(w, fmt.Sprintf("Failed to read file: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	_, err = p.Write(fileBytes)
-	if err != nil {
-		log.Printf("Failed to write to printer: %v", err)
-		writeJSONError(w, fmt.Sprintf("Failed to write to printer: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	err = p.EndPage()
-	if err != nil {
-		log.Printf("Failed to end page: %v", err)
-		writeJSONError(w, fmt.Sprintf("Failed to end page: %v", err), http.StatusInternalServerError)
-		return
-	}
-
-	log.Printf("Successfully sent file '%s' to printer '%s'", filePath, printerToUse)
-	writeJSONResponse(w, map[string]string{
-		"message": "Print job sent successfully.",
-		"details": fmt.Sprintf("File: %s, Printer: %s", filePath, printerToUse),
-	}, http.StatusOK)
 }
 
 // downloadFile downloads a file from a URL and saves it locally.
