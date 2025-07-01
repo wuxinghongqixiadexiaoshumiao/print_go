@@ -52,6 +52,7 @@ func main() {
 	mux.HandleFunc("/upload", handleFileUpload)
 	mux.HandleFunc("/files", listFiles)
 	mux.HandleFunc("/print", handlePrint)
+	mux.HandleFunc("/printers", listPrinters)
 
 	// Serve static files if a 'static' directory exists
 	if _, err := os.Stat("./static"); !os.IsNotExist(err) {
