@@ -9,6 +9,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
+	"pat
 	"path/filepath"
 	"strings"
 
@@ -89,6 +91,26 @@ func handlePrint(w http.ResponseWriter, r *http.Request) {
 		}
 		printerToUse = defaultPrinter
 	}
+断文件类型
+	ext := strings.ToLower(filepath.Ext(filePath))
+	if ext == ".pdf" {
+		// 使用SumatraPDF.exe静默打印PDF
+		sumatraPath, err := filepath.Abs("SumatraPDF.exe")
+		if err != nil {
+			log.Printf("获取SumatraPDF.exe绝对路径失败: %v", err)
+			writeJSONError(w, "无法获取SumatraPDF.exe绝对路径", http.StatusInternalServerError)
+			return
+		}
+		args := []string{"-print-to-default", filePath, "-silent"}
+		if printerToUse != "" {
+			args = []string{"-print-to", printerToUse, filePath, "-silent"}
+		}
+		cmd := exec.Command(sumatraPath, args...)
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			log.Printf("SumatraPDF打印失败: %v Output: %s", err, string(output))
+			writeJSONError(w, fmt.Sprintf("SumatraPDF打印失败: %v Output: %s", err, string(output)), http.StatusInternalServerError)
+			
 
 	p, err := printer.Open(printerToUse)
 	if err != nil {
