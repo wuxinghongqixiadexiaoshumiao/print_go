@@ -1,0 +1,176 @@
+//go:build windows
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"os"
+	"path/filepath"
+	"strings"
+
+	"github.com/alexbrainman/printer"
+	"github.com/google/uuid"
+)
+
+// listPrinters handles requests to list all available printers on the system.
+func listPrinters(w http.ResponseWriter, r *http.Request) {
+	printers, err := printer.ReadNames()
+	if err != nil {
+		log.Printf("Failed to read printer names: %v", err)
+		writeJSONError(w, "Could not list printers", http.StatusInternalServerError)
+		return
+	}
+
+	writeJSONResponse(w, printers, http.StatusOK)
+}
+
+// handlePrint handles the printing request directly to the printer.
+func handlePrint(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeJSONError(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		FileName    string `json:"fileName"`
+		URL         string `json:"url"`
+		PrinterName string `json:"printerName,omitempty"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		log.Printf("Print request JSON decoding error: %v", err)
+		writeJSONError(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	if (req.FileName == "" && req.URL == "") || (req.FileName != "" && req.URL != "") {
+		writeJSONError(w, "fileName and url are mutually exclusive", http.StatusBadRequest)
+		return
+	}
+
+	var filePath string
+	if req.URL != "" {
+		var err error
+		filePath, err = downloadFile(req.URL)
+		if err != nil {
+			log.Printf("Failed to download file: %v", err)
+			writeJSONError(w, "Failed to download file from URL", http.StatusInternalServerError)
+			return
+		}
+	} else {
+		filePath = filepath.Join(uploadDir, req.FileName)
+	}
+
+	absFilePath, err := filepath.Abs(filePath)
+	if err != nil {
+		log.Printf("Failed to get absolute path for %s: %v", filePath, err)
+		absFilePath = filePath
+	}
+	filePath = absFilePath
+
+	if _, err := os.Stat(filePath); os.IsNotExist(err) {
+		log.Printf("File does not exist: %s", filePath)
+		writeJSONError(w, "File not found", http.StatusNotFound)
+		return
+	}
+
+	printerToUse := req.PrinterName
+
+	if printerToUse == "" {
+		defaultPrinter, err := printer.Default()
+		if err != nil {
+			log.Printf("Could not get default printer: %v. Please specify a printer.", err)
+			writeJSONError(w, "Could not get default printer. Please specify a printer.", http.StatusInternalServerError)
+			return
+		}
+		printerToUse = defaultPrinter
+	}
+
+	p, err := printer.Open(printerToUse)
+	if err != nil {
+		log.Printf("Failed to open printer '%s': %v", printerToUse, err)
+		writeJSONError(w, fmt.Sprintf("Failed to open printer: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer p.Close()
+
+	err = p.StartDocument(filepath.Base(filePath), "RAW")
+	if err != nil {
+		log.Printf("Failed to start document: %v", err)
+		writeJSONError(w, fmt.Sprintf("Failed to start document: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer p.EndDocument()
+
+	err = p.StartPage()
+	if err != nil {
+		log.Printf("Failed to start page: %v", err)
+		writeJSONError(w, fmt.Sprintf("Failed to start page: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	fileBytes, err := os.ReadFile(filePath)
+	if err != nil {
+		log.Printf("Failed to read file '%s': %v", filePath, err)
+		writeJSONError(w, fmt.Sprintf("Failed to read file: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	_, err = p.Write(fileBytes)
+	if err != nil {
+		log.Printf("Failed to write to printer: %v", err)
+		writeJSONError(w, fmt.Sprintf("Failed to write to printer: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	err = p.EndPage()
+	if err != nil {
+		log.Printf("Failed to end page: %v", err)
+		writeJSONError(w, fmt.Sprintf("Failed to end page: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	log.Printf("Successfully sent file '%s' to printer '%s'", filePath, printerToUse)
+	writeJSONResponse(w, map[string]string{
+		"message": "Print job sent successfully.",
+		"details": fmt.Sprintf("File: %s, Printer: %s", filePath, printerToUse),
+	}, http.StatusOK)
+}
+
+// downloadFile downloads a file from a URL and saves it locally.
+func downloadFile(url string) (string, error) {
+	resp, err := http.Get(url)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("bad status: %s", resp.Status)
+	}
+
+	ext := filepath.Ext(url)
+	if ext == "" {
+		ext = ".dat"
+	}
+	fileName := fmt.Sprintf("%s%s", generateUUID(), ext)
+	filePath := filepath.Join(uploadDir, fileName)
+
+	out, err := os.Create(filePath)
+	if err != nil {
+		return "", err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, resp.Body)
+	return filePath, err
+}
+
+// generateUUID creates a unique string ID.
+func generateUUID() string {
+	return strings.ReplaceAll(uuid.New().String(), "-", "")
+}
